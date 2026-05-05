@@ -16,8 +16,13 @@
             100% { background-color: transparent; }
         }
 
-        /* Login Overlay Styles */
-        #loginOverlay {
+        /* Active Button Styles */
+        .btn-active-blue { background-color: #2563eb !important; color: white !important; border-color: #1d4ed8 !important; }
+        .btn-active-green { background-color: #166534 !important; color: white !important; border-color: #14532d !important; }
+        .btn-active-red { background-color: #991b1b !important; color: white !important; border-color: #7f1d1d !important; }
+        .btn-active-slate { background-color: #1e293b !important; color: white !important; border-color: #0f172a !important; }
+
+        /* Login Overlay Styles */        #loginOverlay {
             position: fixed;
             top: 0;
             left: 0;
@@ -136,8 +141,8 @@
                 <div>
                     <p class="text-sm font-medium text-slate-700 mb-2">Hai dato l'omaggio?</p>
                     <div class="flex gap-2">
-                        <button onclick="setField('omaggio', 'Sì')" class="btn-toggle flex-1 py-2 rounded bg-white border border-slate-300 hover:bg-blue-50 focus:bg-blue-600 focus:text-white transition">Sì</button>
-                        <button onclick="setField('omaggio', 'No')" class="btn-toggle flex-1 py-2 rounded bg-white border border-slate-300 hover:bg-blue-50 focus:bg-blue-600 focus:text-white transition">No</button>
+                        <button id="btn-omaggio-Sì" onclick="setField('omaggio', 'Sì')" class="btn-toggle flex-1 py-2 rounded bg-white border border-slate-300 hover:bg-blue-50 transition">Sì</button>
+                        <button id="btn-omaggio-No" onclick="setField('omaggio', 'No')" class="btn-toggle flex-1 py-2 rounded bg-white border border-slate-300 hover:bg-blue-50 transition">No</button>
                     </div>
                 </div>
 
@@ -145,8 +150,8 @@
                 <div>
                     <p class="text-sm font-medium text-slate-700 mb-2">Preso contatto?</p>
                     <div class="flex gap-2">
-                        <button onclick="setField('contatto', 'Sì')" class="btn-toggle flex-1 py-2 rounded bg-white border border-slate-300 hover:bg-blue-50 focus:bg-blue-600 focus:text-white transition">Sì</button>
-                        <button onclick="setField('contatto', 'No')" class="btn-toggle flex-1 py-2 rounded bg-white border border-slate-300 hover:bg-blue-50 focus:bg-blue-600 focus:text-white transition">No</button>
+                        <button id="btn-contatto-Sì" onclick="setField('contatto', 'Sì')" class="btn-toggle flex-1 py-2 rounded bg-white border border-slate-300 hover:bg-blue-50 transition">Sì</button>
+                        <button id="btn-contatto-No" onclick="setField('contatto', 'No')" class="btn-toggle flex-1 py-2 rounded bg-white border border-slate-300 hover:bg-blue-50 transition">No</button>
                     </div>
                 </div>
 
@@ -154,9 +159,9 @@
                 <div>
                     <p class="text-sm font-medium text-slate-700 mb-2">Stato Lead?</p>
                     <div class="flex flex-col gap-2">
-                        <button onclick="setField('stato', 'DA CONTATTARE')" class="py-2 rounded bg-green-100 text-green-800 border border-green-200 hover:bg-green-200 font-bold">DA CONTATTARE</button>
-                        <button onclick="setField('stato', 'NO SECCO')" class="py-2 rounded bg-red-100 text-red-800 border border-red-200 hover:bg-red-200 font-bold">NO SECCO</button>
-                        <button onclick="setField('stato', 'IN ATTESA')" class="py-2 rounded bg-slate-100 text-slate-800 border border-slate-200 hover:bg-slate-200 font-bold">IN ATTESA</button>
+                        <button id="btn-stato-DA CONTATTARE" onclick="setField('stato', 'DA CONTATTARE')" class="btn-stato py-2 rounded bg-green-100 text-green-800 border border-green-200 hover:bg-green-200 font-bold">DA CONTATTARE</button>
+                        <button id="btn-stato-NO SECCO" onclick="setField('stato', 'NO SECCO')" class="btn-stato py-2 rounded bg-red-100 text-red-800 border border-red-200 hover:bg-red-200 font-bold">NO SECCO</button>
+                        <button id="btn-stato-IN ATTESA" onclick="setField('stato', 'IN ATTESA')" class="btn-stato py-2 rounded bg-slate-100 text-slate-800 border border-slate-200 hover:bg-slate-200 font-bold">IN ATTESA</button>
                     </div>
                 </div>
             </div>
@@ -290,15 +295,17 @@
     }
 
     async function addNewCompany() {
-        const name = document.getElementById('newCompanyName').value.trim();
-        const pad = document.getElementById('newCompanyPad').value.trim();
+        const nameInput = document.getElementById('newCompanyName');
+        const padInput = document.getElementById('newCompanyPad');
+        const name = nameInput.value.trim();
+        const pad = padInput.value.trim();
 
         if (!name || !pad) {
             alert("Inserisci sia il nome che il padiglione.");
             return;
         }
 
-        const { db, collection, addDoc, setDoc, doc } = window.firebaseApp;
+        const { db, collection, addDoc } = window.firebaseApp;
         
         const newCompany = {
             azienda: name.toUpperCase(),
@@ -309,9 +316,6 @@
         };
 
         try {
-            // Aggiungiamo a Firestore con ID automatico
-            // Nota: ho aggiunto addDoc alle funzioni esposte sotto
-            const { addDoc } = window.firebaseApp;
             const docRef = await addDoc(collection(db, "companies"), newCompany);
             
             // Aggiorna database locale e UI
@@ -324,7 +328,7 @@
             alert("Azienda aggiunta con successo!");
         } catch (error) {
             console.error("Errore aggiunta azienda:", error);
-            alert("Errore durante l'aggiunta dell'azienda.");
+            alert("Errore durante l'aggiunta dell'azienda. Verifica la console per i dettagli.");
         }
     }
 
@@ -357,19 +361,46 @@
 
     function selectCompany(name) {
         const idx = database.findIndex(i => i.azienda === name);
+        const item = database[idx];
         currentSelection.index = idx;
+        currentSelection.omaggio = (item.omaggio === "-" || !item.omaggio) ? "No" : item.omaggio;
+        currentSelection.contatto = (item.contatto === "-" || !item.contatto) ? "No" : item.contatto;
+        currentSelection.stato = item.stato;
+
         document.getElementById('selectedCompanyName').innerText = name;
         document.getElementById('companyInput').value = name;
         document.getElementById('suggestions').classList.add('hidden');
         document.getElementById('interactionForm').classList.remove('hidden');
 
-        // Reset visuale bottoni
-        const buttons = document.querySelectorAll('.btn-toggle');
-        buttons.forEach(b => b.classList.remove('bg-blue-600', 'text-white'));
+        updateButtonVisuals();
     }
 
     function setField(field, value) {
         currentSelection[field] = value;
+        updateButtonVisuals();
+    }
+
+    function updateButtonVisuals() {
+        // Reset all buttons
+        document.querySelectorAll('.btn-toggle, .btn-stato').forEach(b => {
+            b.classList.remove('btn-active-blue', 'btn-active-green', 'btn-active-red', 'btn-active-slate');
+        });
+
+        // Highlight Omaggio
+        const omaggioBtn = document.getElementById(`btn-omaggio-${currentSelection.omaggio}`);
+        if (omaggioBtn) omaggioBtn.classList.add('btn-active-blue');
+
+        // Highlight Contatto
+        const contattoBtn = document.getElementById(`btn-contatto-${currentSelection.contatto}`);
+        if (contattoBtn) contattoBtn.classList.add('btn-active-blue');
+
+        // Highlight Stato
+        const statoBtn = document.getElementById(`btn-stato-${currentSelection.stato}`);
+        if (statoBtn) {
+            if (currentSelection.stato === 'DA CONTATTARE') statoBtn.classList.add('btn-active-green');
+            else if (currentSelection.stato === 'NO SECCO') statoBtn.classList.add('btn-active-red');
+            else statoBtn.classList.add('btn-active-slate');
+        }
     }
 
     async function saveInteraction() {

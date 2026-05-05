@@ -45,7 +45,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
         import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-        import { getFirestore, collection, getDocs, doc, updateDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+        import { getFirestore, collection, getDocs, doc, updateDoc, setDoc, addDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
         // Configurazione basata sul tuo Project ID
         const firebaseConfig = {
@@ -64,7 +64,7 @@
         const provider = new GoogleAuthProvider();
 
         // Esponi le funzioni globalmente per l'uso nell'HTML esistente
-        window.firebaseApp = { app, auth, db, provider, signInWithPopup, onAuthStateChanged, signOut, collection, getDocs, doc, updateDoc, setDoc };
+        window.firebaseApp = { app, auth, db, provider, signInWithPopup, onAuthStateChanged, signOut, collection, getDocs, doc, updateDoc, setDoc, addDoc };
     </script>
 </head>
 <body class="bg-slate-50 min-h-screen p-4 md:p-8">
@@ -104,8 +104,27 @@
                 <input type="text" id="companyInput" placeholder="Inizia a scrivere il nome..."
                        class="flex-1 p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
                        oninput="handleSearch()">
+                <button onclick="showNewCompanyForm()" class="bg-slate-800 text-white px-4 py-2 rounded-lg hover:bg-slate-700 transition flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                    </svg>
+                    Nuova
+                </button>
             </div>
             <div id="suggestions" class="mt-1 border border-slate-200 rounded-lg hidden bg-white shadow-lg overflow-hidden z-10 absolute w-full max-w-md"></div>
+        </div>
+
+        <!-- New Company Form -->
+        <div id="newCompanyForm" class="hidden space-y-4 border-t pt-6 bg-blue-50 p-4 rounded-lg mb-6">
+            <h3 class="font-bold text-slate-800">Aggiungi Nuova Azienda</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <input type="text" id="newCompanyName" placeholder="Nome Azienda" class="p-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <input type="text" id="newCompanyPad" placeholder="Padiglione" class="p-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="flex justify-end gap-2">
+                <button onclick="hideNewCompanyForm()" class="px-4 py-2 text-slate-600 hover:text-slate-800">Annulla</button>
+                <button onclick="addNewCompany()" class="bg-blue-600 text-white px-6 py-2 rounded font-bold hover:bg-blue-700 shadow-md">Aggiungi</button>
+            </div>
         </div>
 
         <!-- Interactive Question Form -->
@@ -256,6 +275,57 @@
     async function logout() {
         const { auth, signOut } = window.firebaseApp;
         await signOut(auth);
+    }
+
+    // Nuove funzioni per gestione Aziende
+    function showNewCompanyForm() {
+        document.getElementById('newCompanyForm').classList.remove('hidden');
+        document.getElementById('newCompanyName').focus();
+    }
+
+    function hideNewCompanyForm() {
+        document.getElementById('newCompanyForm').classList.add('hidden');
+        document.getElementById('newCompanyName').value = "";
+        document.getElementById('newCompanyPad').value = "";
+    }
+
+    async function addNewCompany() {
+        const name = document.getElementById('newCompanyName').value.trim();
+        const pad = document.getElementById('newCompanyPad').value.trim();
+
+        if (!name || !pad) {
+            alert("Inserisci sia il nome che il padiglione.");
+            return;
+        }
+
+        const { db, collection, addDoc, setDoc, doc } = window.firebaseApp;
+        
+        const newCompany = {
+            azienda: name.toUpperCase(),
+            pad: pad,
+            omaggio: "-",
+            contatto: "-",
+            stato: "IN ATTESA"
+        };
+
+        try {
+            // Aggiungiamo a Firestore con ID automatico
+            // Nota: ho aggiunto addDoc alle funzioni esposte sotto
+            const { addDoc } = window.firebaseApp;
+            const docRef = await addDoc(collection(db, "companies"), newCompany);
+            
+            // Aggiorna database locale e UI
+            database.push({ id: docRef.id, ...newCompany });
+            database.sort((a, b) => a.azienda.localeCompare(b.azienda));
+            
+            renderTable(newCompany.azienda);
+            hideNewCompanyForm();
+            
+            alert("Azienda aggiunta con successo!");
+        } catch (error) {
+            console.error("Errore aggiunta azienda:", error);
+            alert("Errore durante l'aggiunta dell'azienda.");
+        }
     }
 
     function handleSearch() {

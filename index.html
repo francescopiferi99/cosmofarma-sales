@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestore Lead Cosmofarma</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .status-pill { padding: 4px 12px; border-radius: 9999px; font-weight: 600; font-size: 0.8rem; }
+        .status-wait { background: #edf2f7; color: #4a5568; }
+        .status-contact { background: #c6f6d5; color: #22543d; }
+        .status-no { background: #fed7d7; color: #822727; }
+        .highlight-row { animation: highlight 2s ease-out; }
+        @keyframes highlight {
+            0% { background-color: #fefcbf; }
+            100% { background-color: transparent; }
+        }
+
+        /* Login Overlay Styles */
+        #loginOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #f8fafc; /* Tailwind slate-50 */
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        #loginOverlay.hidden {
+            display: none;
+        }
+        #appContainer {
+            display: none; /* Hidden until logged in */
+        }
+        #appContainer.visible {
+            display: block;
+        }
+    </style>
+
+    <!-- Firebase SDKs (Modular version) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+        import { getFirestore, collection, getDocs, doc, updateDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+        // Configurazione basata sul tuo Project ID
+        const firebaseConfig = {
+            apiKey: "AIzaSyBHssUiKjlG7CFrAiopQuzHQz8gROxDlk0",
+            authDomain: "cosmofarma-sales.firebaseapp.com",
+            projectId: "cosmofarma-sales",
+            storageBucket: "cosmofarma-sales.firebasestorage.app",
+            messagingSenderId: "762192543787",
+            appId: "1:762192543787:web:952cbee9da311a2fc72a6e",
+            measurementId: "G-1CRJTM1Q3Q"
+        };
+        // Inizializza Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const provider = new GoogleAuthProvider();
+
+        // Esponi le funzioni globalmente per l'uso nell'HTML esistente
+        window.firebaseApp = { app, auth, db, provider, signInWithPopup, onAuthStateChanged, signOut, collection, getDocs, doc, updateDoc, setDoc };
+    </script>
+</head>
+<body class="bg-slate-50 min-h-screen p-4 md:p-8">
+
+<!-- Login Overlay -->
+<div id="loginOverlay" class="p-8 text-center">
+    <div class="bg-white p-8 rounded-2xl shadow-xl border border-slate-200 max-w-sm w-full">
+        <h1 class="text-2xl font-bold text-slate-800 mb-2">Cosmofarma Sales</h1>
+        <p class="text-slate-500 mb-8">Effettua l'accesso per gestire i lead</p>
+        <button onclick="login()" class="w-full flex items-center justify-center gap-3 bg-white border border-slate-300 py-3 rounded-lg font-semibold text-slate-700 hover:bg-slate-50 transition shadow-sm">
+            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20" height="20" alt="Google">
+            Accedi con Google
+        </button>
+    </div>
+</div>
+
+<div id="appContainer" class="max-w-4xl mx-auto">
+    <!-- Header -->
+    <header class="mb-8 text-center relative">
+        <div class="absolute right-0 top-0">
+            <button onclick="logout()" class="text-xs text-slate-500 hover:text-red-600 transition flex items-center gap-1">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+                Esci
+            </button>
+        </div>
+        <h1 class="text-3xl font-bold text-slate-800">Cosmofarma Sales Tracker</h1>
+        <p class="text-slate-600">Inserisci l'azienda e compila l'esito dell'interazione</p>
+    </header>
+
+    <!-- Search & Action Card -->
+    <div class="bg-white rounded-xl shadow-md p-6 mb-8 border border-slate-200">
+        <div class="mb-6">
+            <label class="block text-sm font-semibold text-slate-700 mb-2">Cerca Azienda nel Database</label>
+            <div class="flex gap-2">
+                <input type="text" id="companyInput" placeholder="Inizia a scrivere il nome..."
+                       class="flex-1 p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                       oninput="handleSearch()">
+            </div>
+            <div id="suggestions" class="mt-1 border border-slate-200 rounded-lg hidden bg-white shadow-lg overflow-hidden z-10 absolute w-full max-w-md"></div>
+        </div>
+
+        <!-- Interactive Question Form -->
+        <div id="interactionForm" class="hidden space-y-6 border-t pt-6 bg-slate-50 p-4 rounded-lg">
+            <h2 class="text-lg font-bold text-blue-800" id="selectedCompanyName">Azienda Selezionata</h2>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- Omaggio -->
+                <div>
+                    <p class="text-sm font-medium text-slate-700 mb-2">Hai dato l'omaggio?</p>
+                    <div class="flex gap-2">
+                        <button onclick="setField('omaggio', 'Sì')" class="btn-toggle flex-1 py-2 rounded bg-white border border-slate-300 hover:bg-blue-50 focus:bg-blue-600 focus:text-white transition">Sì</button>
+                        <button onclick="setField('omaggio', 'No')" class="btn-toggle flex-1 py-2 rounded bg-white border border-slate-300 hover:bg-blue-50 focus:bg-blue-600 focus:text-white transition">No</button>
+                    </div>
+                </div>
+
+                <!-- Contatto -->
+                <div>
+                    <p class="text-sm font-medium text-slate-700 mb-2">Preso contatto?</p>
+                    <div class="flex gap-2">
+                        <button onclick="setField('contatto', 'Sì')" class="btn-toggle flex-1 py-2 rounded bg-white border border-slate-300 hover:bg-blue-50 focus:bg-blue-600 focus:text-white transition">Sì</button>
+                        <button onclick="setField('contatto', 'No')" class="btn-toggle flex-1 py-2 rounded bg-white border border-slate-300 hover:bg-blue-50 focus:bg-blue-600 focus:text-white transition">No</button>
+                    </div>
+                </div>
+
+                <!-- Esito -->
+                <div>
+                    <p class="text-sm font-medium text-slate-700 mb-2">Stato Lead?</p>
+                    <div class="flex flex-col gap-2">
+                        <button onclick="setField('stato', 'DA CONTATTARE')" class="py-2 rounded bg-green-100 text-green-800 border border-green-200 hover:bg-green-200 font-bold">DA CONTATTARE</button>
+                        <button onclick="setField('stato', 'NO SECCO')" class="py-2 rounded bg-red-100 text-red-800 border border-red-200 hover:bg-red-200 font-bold">NO SECCO</button>
+                        <button onclick="setField('stato', 'IN ATTESA')" class="py-2 rounded bg-slate-100 text-slate-800 border border-slate-200 hover:bg-slate-200 font-bold">IN ATTESA</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex justify-end">
+                <button onclick="saveInteraction()" class="bg-blue-700 text-white px-8 py-3 rounded-lg font-bold hover:bg-blue-800 shadow-lg">SALVA RISULTATO</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Data Table -->
+    <div class="bg-white rounded-xl shadow-md overflow-hidden border border-slate-200">
+        <div class="p-4 bg-slate-800 text-white flex justify-between items-center">
+            <h3 class="font-bold">Log Interazioni</h3>
+            <button onclick="exportData()" class="text-xs bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded border border-slate-500">Esporta CSV</button>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left">
+                <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
+                <tr>
+                    <th class="px-6 py-4">Azienda</th>
+                    <th class="px-6 py-4 text-center">Padiglione</th>
+                    <th class="px-6 py-4 text-center">Omaggio</th>
+                    <th class="px-6 py-4 text-center">Contatto</th>
+                    <th class="px-6 py-4 text-center">Stato</th>
+                </tr>
+                </thead>
+                <tbody id="tableBody" class="text-slate-700 divide-y divide-slate-100">
+                <!-- Rows will be populated here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    let database = [];
+    let currentSelection = {
+        index: null,
+        omaggio: "No",
+        contatto: "No",
+        stato: "IN ATTESA"
+    };
+
+    // Firebase state management
+    async function init() {
+        const { auth, onAuthStateChanged, db, collection, getDocs } = window.firebaseApp;
+
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                document.getElementById('loginOverlay').classList.add('hidden');
+                document.getElementById('appContainer').classList.add('visible');
+                await loadData();
+            } else {
+                document.getElementById('loginOverlay').classList.remove('hidden');
+                document.getElementById('appContainer').classList.remove('visible');
+            }
+        });
+    }
+
+    async function loadData() {
+        const { db, collection, getDocs, doc, setDoc } = window.firebaseApp;
+        try {
+            const querySnapshot = await getDocs(collection(db, "companies"));
+            database = [];
+            querySnapshot.forEach((doc) => {
+                database.push({ id: doc.id, ...doc.data() });
+            });
+
+            // --- MIGRATION INITIAL DATA ---
+            // Se il database è vuoto, lo popoliamo con i dati iniziali
+            if (database.length === 0) {
+                console.log("Database vuoto, avvio migrazione dati iniziali...");
+                const initialData = [
+                    { azienda: "A. ANANIA MEDICAL&WELLNESS", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
+                    { azienda: "AB-GLOBAL SRL", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
+                    { azienda: "ABEAUTY SRL", pad: "26", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
+                    { azienda: "ALCEA SRL", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
+                    { azienda: "ARROW 1 SRL", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
+                    { azienda: "ARVAL SRL", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
+                    { azienda: "BAKEL SPA", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
+                    { azienda: "BEIERSDORF SPA", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
+                    { azienda: "SMART MOB SRLS", pad: "30", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
+                    { azienda: "SOKETO SRL", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
+                    { azienda: "STUDIOFARMA SRL", pad: "29", omaggio: "-", contatto: "-", stato: "IN ATTESA" }
+                ];
+
+                for (const item of initialData) {
+                    const newDocRef = doc(collection(db, "companies"));
+                    await setDoc(newDocRef, item);
+                    database.push({ id: newDocRef.id, ...item });
+                }
+                console.log("Migrazione completata!");
+            }
+            // ------------------------------
+
+            // Ordina alfabeticamente per azienda
+            database.sort((a, b) => a.azienda.localeCompare(b.azienda));
+
+            renderTable();
+        } catch (error) {
+            console.error("Errore nel caricamento dati:", error);
+        }
+    }
+
+    async function login() {
+        const { auth, provider, signInWithPopup } = window.firebaseApp;
+        try {
+            await signInWithPopup(auth, provider);
+        } catch (error) {
+            console.error("Errore durante il login:", error);
+            alert("Errore durante il login con Google.");
+        }
+    }
+
+    async function logout() {
+        const { auth, signOut } = window.firebaseApp;
+        await signOut(auth);
+    }
+
+    function handleSearch() {
+        const input = document.getElementById('companyInput').value.toLowerCase();
+        const suggestionsDiv = document.getElementById('suggestions');
+
+        if (input.length < 2) {
+            suggestionsDiv.classList.add('hidden');
+            return;
+        }
+
+        const matches = database.filter(item => item.azienda.toLowerCase().includes(input));
+
+        if (matches.length > 0) {
+            suggestionsDiv.innerHTML = matches.map(item => `
+                    <div class="p-3 hover:bg-blue-50 cursor-pointer border-b last:border-0"
+                         onclick="selectCompany('${item.azienda.replace(/'/g, "\\'")}')">
+                        <span class="font-bold">${item.azienda}</span> <span class="text-xs text-slate-400">(${item.pad})</span>
+                    </div>
+                `).join('');
+            suggestionsDiv.classList.remove('hidden');
+        } else {
+            suggestionsDiv.innerHTML = `
+                    <div class="p-3 text-slate-400 text-sm">Nessun risultato trovato.</div>
+                `;
+            suggestionsDiv.classList.remove('hidden');
+        }
+    }
+
+    function selectCompany(name) {
+        const idx = database.findIndex(i => i.azienda === name);
+        currentSelection.index = idx;
+        document.getElementById('selectedCompanyName').innerText = name;
+        document.getElementById('companyInput').value = name;
+        document.getElementById('suggestions').classList.add('hidden');
+        document.getElementById('interactionForm').classList.remove('hidden');
+
+        // Reset visuale bottoni
+        const buttons = document.querySelectorAll('.btn-toggle');
+        buttons.forEach(b => b.classList.remove('bg-blue-600', 'text-white'));
+    }
+
+    function setField(field, value) {
+        currentSelection[field] = value;
+    }
+
+    async function saveInteraction() {
+        if (currentSelection.index !== null) {
+            const { db, doc, updateDoc } = window.firebaseApp;
+            const item = database[currentSelection.index];
+
+            const updatedData = {
+                omaggio: currentSelection.omaggio,
+                contatto: currentSelection.contatto,
+                stato: currentSelection.stato
+            };
+
+            try {
+                // Aggiorna su Firestore
+                const companyRef = doc(db, "companies", item.id);
+                await updateDoc(companyRef, updatedData);
+
+                // Aggiorna localmente
+                item.omaggio = updatedData.omaggio;
+                item.contatto = updatedData.contatto;
+                item.stato = updatedData.stato;
+
+                renderTable(item.azienda);
+
+                // Reset form
+                document.getElementById('interactionForm').classList.add('hidden');
+                document.getElementById('companyInput').value = "";
+                document.getElementById('companyInput').focus();
+
+                const banner = document.createElement('div');
+                banner.className = "fixed top-4 right-4 bg-green-600 text-white px-6 py-3 rounded shadow-2xl z-50 animate-bounce";
+                banner.innerText = "Dati Salvati per " + item.azienda;
+                document.body.appendChild(banner);
+                setTimeout(() => banner.remove(), 2500);
+            } catch (error) {
+                console.error("Errore durante il salvataggio:", error);
+                alert("Errore nel salvataggio dei dati su Firebase.");
+            }
+        }
+    }
+
+    function renderTable(highlightName = null) {
+        const tbody = document.getElementById('tableBody');
+        tbody.innerHTML = database.map(item => `
+                <tr class="${item.azienda === highlightName ? 'highlight-row' : ''}">
+                    <td class="px-6 py-4 font-medium text-slate-900">${item.azienda}</td>
+                    <td class="px-6 py-4 text-center text-slate-500">${item.pad}</td>
+                    <td class="px-6 py-4 text-center">
+                        <span class="text-xs ${item.omaggio === 'Sì' ? 'text-green-600 font-bold' : 'text-slate-400'}">${item.omaggio}</span>
+                    </td>
+                    <td class="px-6 py-4 text-center">
+                        <span class="text-xs ${item.contatto === 'Sì' ? 'text-blue-600 font-bold' : 'text-slate-400'}">${item.contatto}</span>
+                    </td>
+                    <td class="px-6 py-4 text-center">
+                        <span class="status-pill ${getStatusClass(item.stato)}">${item.stato}</span>
+                    </td>
+                </tr>
+            `).join('');
+    }
+
+    function getStatusClass(stato) {
+        if (stato === 'DA CONTATTARE') return 'status-contact';
+        if (stato === 'NO SECCO') return 'status-no';
+        return 'status-wait';
+    }
+
+    function exportData() {
+        let csv = "Azienda,Padiglione,Omaggio,Contatto,Stato\n";
+        database.forEach(row => {
+            csv += `"${row.azienda}",${row.pad},${row.omaggio},${row.contatto},${row.stato}\n`;
+        });
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.setAttribute('href', url);
+        a.setAttribute('download', 'esiti_fiera.csv');
+        a.click();
+    }
+
+    // Wait for Firebase script to load global variables
+    const checkFirebase = setInterval(() => {
+        if (window.firebaseApp) {
+            clearInterval(checkFirebase);
+            init();
+        }
+    }, 100);
+</script>
+</body>
+</html>

@@ -39,10 +39,26 @@
             display: none;
         }
         #appContainer {
-            display: none; /* Hidden until logged in */
+            display: none; /* Hidden until logged in AND code entered */
         }
         #appContainer.visible {
             display: block;
+        }
+        #teamCodeOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #f8fafc;
+            z-index: 90;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        #teamCodeOverlay.visible {
+            display: flex;
         }
     </style>
 
@@ -50,7 +66,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
         import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-        import { getFirestore, collection, getDocs, doc, updateDoc, setDoc, addDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+        import { getFirestore, collection, getDocs, doc, updateDoc, setDoc, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
         // Configurazione basata sul tuo Project ID
         const firebaseConfig = {
@@ -69,7 +85,7 @@
         const provider = new GoogleAuthProvider();
 
         // Esponi le funzioni globalmente per l'uso nell'HTML esistente
-        window.firebaseApp = { app, auth, db, provider, signInWithPopup, onAuthStateChanged, signOut, collection, getDocs, doc, updateDoc, setDoc, addDoc };
+        window.firebaseApp = { app, auth, db, provider, signInWithPopup, onAuthStateChanged, signOut, collection, getDocs, doc, updateDoc, setDoc, addDoc, onSnapshot };
     </script>
 </head>
 <body class="bg-slate-50 min-h-screen p-4 md:p-8">
@@ -78,11 +94,21 @@
 <div id="loginOverlay" class="p-8 text-center">
     <div class="bg-white p-8 rounded-2xl shadow-xl border border-slate-200 max-w-sm w-full">
         <h1 class="text-2xl font-bold text-slate-800 mb-2">Cosmofarma Sales</h1>
-        <p class="text-slate-500 mb-8">Effettua l'accesso per gestire i lead</p>
+        <p class="text-slate-500 mb-8">Effettua l'accesso con Google</p>
         <button onclick="login()" class="w-full flex items-center justify-center gap-3 bg-white border border-slate-300 py-3 rounded-lg font-semibold text-slate-700 hover:bg-slate-50 transition shadow-sm">
             <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20" height="20" alt="Google">
             Accedi con Google
         </button>
+    </div>
+</div>
+
+<!-- Team Code Overlay -->
+<div id="teamCodeOverlay" class="p-8 text-center">
+    <div class="bg-white p-8 rounded-2xl shadow-xl border border-slate-200 max-w-sm w-full">
+        <h2 class="text-xl font-bold text-slate-800 mb-2">Accesso Team</h2>
+        <p class="text-slate-500 mb-6">Inserisci il codice per visualizzare la tabella condivisa</p>
+        <input type="password" id="teamCodeInput" placeholder="Codice Accesso" class="w-full p-3 border border-slate-300 rounded-lg mb-4 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none">
+        <button onclick="checkTeamCode()" class="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition">ENTRA</button>
     </div>
 </div>
 
@@ -208,65 +234,88 @@
 
     // Firebase state management
     async function init() {
-        const { auth, onAuthStateChanged, db, collection, getDocs } = window.firebaseApp;
+        const { auth, onAuthStateChanged } = window.firebaseApp;
 
         onAuthStateChanged(auth, async (user) => {
             if (user) {
                 document.getElementById('loginOverlay').classList.add('hidden');
-                document.getElementById('appContainer').classList.add('visible');
-                await loadData();
+                // Dopo il login, chiediamo il codice team se non già inserito
+                const savedCode = sessionStorage.getItem('teamCode');
+                if (savedCode === 'medispa2026') {
+                    showApp();
+                } else {
+                    document.getElementById('teamCodeOverlay').classList.add('visible');
+                }
             } else {
                 document.getElementById('loginOverlay').classList.remove('hidden');
+                document.getElementById('teamCodeOverlay').classList.remove('visible');
                 document.getElementById('appContainer').classList.remove('visible');
             }
         });
     }
 
-    async function loadData() {
-        const { db, collection, getDocs, doc, setDoc } = window.firebaseApp;
-        try {
-            const querySnapshot = await getDocs(collection(db, "companies"));
+    function checkTeamCode() {
+        const code = document.getElementById('teamCodeInput').value;
+        if (code === 'medispa2026') {
+            sessionStorage.setItem('teamCode', code);
+            showApp();
+        } else {
+            alert("Codice errato. Riprova.");
+        }
+    }
+
+    function showApp() {
+        document.getElementById('teamCodeOverlay').classList.remove('visible');
+        document.getElementById('appContainer').classList.add('visible');
+        loadDataRealtime();
+    }
+
+    // Caricamento in REAL TIME
+    function loadDataRealtime() {
+        const { db, collection, onSnapshot, doc, setDoc } = window.firebaseApp;
+
+        // Listener in tempo reale
+        onSnapshot(collection(db, "companies"), (querySnapshot) => {
             database = [];
             querySnapshot.forEach((doc) => {
                 database.push({ id: doc.id, ...doc.data() });
             });
 
-            // --- MIGRATION INITIAL DATA ---
-            // Se il database è vuoto, lo popoliamo con i dati iniziali
+            // Migrazione iniziale se il DB è nuovo/vuoto
             if (database.length === 0) {
-                console.log("Database vuoto, avvio migrazione dati iniziali...");
-                const initialData = [
-                    { azienda: "A. ANANIA MEDICAL&WELLNESS", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
-                    { azienda: "AB-GLOBAL SRL", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
-                    { azienda: "ABEAUTY SRL", pad: "26", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
-                    { azienda: "ALCEA SRL", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
-                    { azienda: "ARROW 1 SRL", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
-                    { azienda: "ARVAL SRL", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
-                    { azienda: "BAKEL SPA", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
-                    { azienda: "BEIERSDORF SPA", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
-                    { azienda: "SMART MOB SRLS", pad: "30", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
-                    { azienda: "SOKETO SRL", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
-                    { azienda: "STUDIOFARMA SRL", pad: "29", omaggio: "-", contatto: "-", stato: "IN ATTESA" }
-                ];
-
-                for (const item of initialData) {
-                    const newDocRef = doc(collection(db, "companies"));
-                    await setDoc(newDocRef, item);
-                    database.push({ id: newDocRef.id, ...item });
-                }
-                console.log("Migrazione completata!");
+                runInitialMigration(db, collection, doc, setDoc);
+                return; // Il listener scatterà di nuovo dopo l'inserimento
             }
-            // ------------------------------
 
-            // Ordina alfabeticamente per azienda
             database.sort((a, b) => a.azienda.localeCompare(b.azienda));
-
             renderTable();
-        } catch (error) {
-            console.error("Errore nel caricamento dati:", error);
-        }
+        }, (error) => {
+            console.error("Errore listener real-time:", error);
+        });
     }
 
+    async function runInitialMigration(db, collection, doc, setDoc) {
+        console.log("Database vuoto, avvio migrazione dati iniziali...");
+        const initialData = [
+            { azienda: "A. ANANIA MEDICAL&WELLNESS", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
+            { azienda: "AB-GLOBAL SRL", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
+            { azienda: "ABEAUTY SRL", pad: "26", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
+            { azienda: "ALCEA SRL", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
+            { azienda: "ARROW 1 SRL", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
+            { azienda: "ARVAL SRL", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
+            { azienda: "BAKEL SPA", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
+            { azienda: "BEIERSDORF SPA", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
+            { azienda: "SMART MOB SRLS", pad: "30", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
+            { azienda: "SOKETO SRL", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
+            { azienda: "STUDIOFARMA SRL", pad: "29", omaggio: "-", contatto: "-", stato: "IN ATTESA" }
+        ];
+
+        for (const item of initialData) {
+            const newDocRef = doc(collection(db, "companies"));
+            await setDoc(newDocRef, item);
+        }
+        console.log("Migrazione completata!");
+    }
     async function login() {
         const { auth, provider, signInWithPopup } = window.firebaseApp;
         try {

@@ -66,7 +66,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
         import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-        import { getFirestore, collection, getDocs, doc, updateDoc, setDoc, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+        import { getFirestore, collection, getDocs, doc, updateDoc, setDoc, addDoc, onSnapshot, arrayUnion, serverTimestamp, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
         // Configurazione basata sul tuo Project ID
         const firebaseConfig = {
@@ -85,7 +85,7 @@
         const provider = new GoogleAuthProvider();
 
         // Esponi le funzioni globalmente per l'uso nell'HTML esistente
-        window.firebaseApp = { app, auth, db, provider, signInWithPopup, onAuthStateChanged, signOut, collection, getDocs, doc, updateDoc, setDoc, addDoc, onSnapshot };
+        window.firebaseApp = { app, auth, db, provider, signInWithPopup, onAuthStateChanged, signOut, collection, getDocs, doc, updateDoc, setDoc, addDoc, onSnapshot, arrayUnion, serverTimestamp, deleteDoc };
     </script>
 </head>
 <body class="bg-slate-50 min-h-screen p-4 md:p-8">
@@ -127,22 +127,35 @@
         <p class="text-slate-600">Inserisci l'azienda e compila l'esito dell'interazione</p>
     </header>
 
-    <!-- Search & Action Card -->
-    <div class="bg-white rounded-xl shadow-md p-6 mb-8 border border-slate-200">
-        <div class="mb-6">
-            <label class="block text-sm font-semibold text-slate-700 mb-2">Cerca Azienda nel Database</label>
-            <div class="flex gap-2">
-                <input type="text" id="companyInput" placeholder="Inizia a scrivere il nome..."
-                       class="flex-1 p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                       oninput="handleSearch()">
-                <button onclick="showNewCompanyForm()" class="bg-slate-800 text-white px-4 py-2 rounded-lg hover:bg-slate-700 transition flex items-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                    </svg>
-                    Nuova
-                </button>
+    <!-- Filter & Action Card -->
+    <div class="bg-white rounded-xl shadow-md p-4 md:p-6 mb-6 border border-slate-200">
+        <div class="flex flex-col gap-4 mb-4 md:mb-6">
+            <div class="w-full">
+                <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Cerca Azienda</label>
+                <div class="flex gap-2">
+                    <input type="text" id="companyInput" placeholder="Nome azienda..."
+                           class="flex-1 p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
+                           oninput="handleSearch()">
+                    <button onclick="showNewCompanyForm()" class="bg-slate-800 text-white p-3 rounded-xl hover:bg-slate-700 transition flex items-center justify-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                        </svg>
+                    </button>
+                </div>
+                <div id="suggestions" class="mt-1 border border-slate-200 rounded-xl hidden bg-white shadow-2xl overflow-hidden z-[100] absolute w-[calc(100%-2rem)] md:w-full max-w-md"></div>
             </div>
-            <div id="suggestions" class="mt-1 border border-slate-200 rounded-lg hidden bg-white shadow-lg overflow-hidden z-10 absolute w-full max-w-md"></div>
+            
+            <div class="w-full">
+                <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Filtra Padiglione</label>
+                <select id="padFilter" onchange="renderTable()" class="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white text-sm appearance-none shadow-sm">
+                    <option value="ALL">Tutti i Padiglioni</option>
+                    <option value="25">Padiglione 25</option>
+                    <option value="26">Padiglione 26</option>
+                    <option value="29">Padiglione 29</option>
+                    <option value="30">Padiglione 30</option>
+                    <option value="-">- Altri</option>
+                </select>
+            </div>
         </div>
 
         <!-- New Company Form -->
@@ -199,26 +212,47 @@
     </div>
 
     <!-- Data Table -->
-    <div class="bg-white rounded-xl shadow-md overflow-hidden border border-slate-200">
-        <div class="p-4 bg-slate-800 text-white flex justify-between items-center">
-            <h3 class="font-bold">Log Interazioni</h3>
-            <button onclick="exportData()" class="text-xs bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded border border-slate-500">Esporta CSV</button>
+    <div class="bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-200">
+        <div class="p-4 bg-slate-900 text-white flex justify-between items-center">
+            <h3 class="font-bold text-sm tracking-wide uppercase">Tabella Aziende</h3>
+            <div class="flex gap-2">
+                <button onclick="protectedMigration()" class="text-[10px] bg-red-800 hover:bg-red-700 px-3 py-2 rounded-lg border border-red-700 font-bold uppercase tracking-wider transition">Reset</button>
+                <button onclick="exportData()" class="text-[10px] bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded-lg border border-slate-700 font-bold uppercase tracking-wider transition">Export</button>
+            </div>
         </div>
         <div class="overflow-x-auto">
-            <table class="w-full text-left">
-                <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
+            <table class="w-full text-left table-auto">
+                <thead class="bg-slate-50 text-slate-400 text-[10px] uppercase tracking-widest border-b border-slate-100">
                 <tr>
-                    <th class="px-6 py-4">Azienda</th>
-                    <th class="px-6 py-4 text-center">Padiglione</th>
-                    <th class="px-6 py-4 text-center">Omaggio</th>
-                    <th class="px-6 py-4 text-center">Contatto</th>
-                    <th class="px-6 py-4 text-center">Stato</th>
+                    <th class="px-4 py-4 min-w-[140px]">Azienda</th>
+                    <th class="px-2 py-4 text-center">Pad</th>
+                    <th class="px-2 py-4 text-center">Omaggio</th>
+                    <th class="px-2 py-4 text-center">Contatto</th>
+                    <th class="px-2 py-4 text-center">Stato</th>
+                    <th class="px-2 py-4 text-center">Log</th>
                 </tr>
                 </thead>
                 <tbody id="tableBody" class="text-slate-700 divide-y divide-slate-100">
                 <!-- Rows will be populated here -->
                 </tbody>
             </table>
+        </div>
+    </div>
+</div>
+
+<!-- History Modal -->
+<div id="historyModal" class="fixed inset-0 bg-black bg-opacity-50 z-[200] hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col shadow-2xl">
+        <div class="p-6 border-b flex justify-between items-center bg-slate-50">
+            <h3 class="text-lg font-bold text-slate-800" id="modalTitle">Storico Modifiche</h3>
+            <button onclick="closeHistoryModal()" class="text-slate-400 hover:text-slate-600">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+        <div id="modalContent" class="p-4 md:p-6 overflow-y-auto space-y-4">
+            <!-- Logs go here -->
         </div>
     </div>
 </div>
@@ -272,7 +306,7 @@
 
     // Caricamento in REAL TIME
     function loadDataRealtime() {
-        const { db, collection, onSnapshot, doc, setDoc } = window.firebaseApp;
+        const { db, collection, onSnapshot } = window.firebaseApp;
 
         // Listener in tempo reale
         onSnapshot(collection(db, "companies"), (querySnapshot) => {
@@ -281,12 +315,9 @@
                 database.push({ id: doc.id, ...doc.data() });
             });
 
-            // Migrazione iniziale se il DB è nuovo/vuoto
-            if (database.length === 0) {
-                runInitialMigration(db, collection, doc, setDoc);
-                return; // Il listener scatterà di nuovo dopo l'inserimento
-            }
-
+            // Se il database è vuoto, non facciamo nulla automaticamente.
+            // Sarà l'utente a cliccare "Sincronizza Excel" se necessario.
+            
             database.sort((a, b) => a.azienda.localeCompare(b.azienda));
             renderTable();
         }, (error) => {
@@ -294,27 +325,2588 @@
         });
     }
 
-    async function runInitialMigration(db, collection, doc, setDoc) {
-        console.log("Database vuoto, avvio migrazione dati iniziali...");
-        const initialData = [
-            { azienda: "A. ANANIA MEDICAL&WELLNESS", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
-            { azienda: "AB-GLOBAL SRL", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
-            { azienda: "ABEAUTY SRL", pad: "26", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
-            { azienda: "ALCEA SRL", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
-            { azienda: "ARROW 1 SRL", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
-            { azienda: "ARVAL SRL", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
-            { azienda: "BAKEL SPA", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
-            { azienda: "BEIERSDORF SPA", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
-            { azienda: "SMART MOB SRLS", pad: "30", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
-            { azienda: "SOKETO SRL", pad: "25", omaggio: "-", contatto: "-", stato: "IN ATTESA" },
-            { azienda: "STUDIOFARMA SRL", pad: "29", omaggio: "-", contatto: "-", stato: "IN ATTESA" }
-        ];
+    async function runInitialMigration(db, collection, doc, setDoc, deleteOld = false) {
+        const { getDocs, deleteDoc } = window.firebaseApp;
+        
+        if (deleteOld) {
+            if (!confirm("Sei sicuro di voler CANCELLARE tutte le aziende attuali e ricaricare quelle da Excel? I dati inseriti andranno persi.")) return;
+        } else {
+            // Se non stiamo forzando la cancellazione, verifichiamo se ci sono già dati
+            const checkSnapshot = await getDocs(collection(db, "companies"));
+            if (!checkSnapshot.empty) {
+                console.log("Database già popolato, salto migrazione automatica.");
+                return;
+            }
+        }
 
+        console.log("Avvio migrazione dati...");
+        
+        if (deleteOld) {
+            const snapshot = await getDocs(collection(db, "companies"));
+            console.log(`Pulizia di ${snapshot.size} documenti...`);
+            for (const d of snapshot.docs) {
+                await deleteDoc(d.ref);
+            }
+            console.log("Database pulito.");
+        }
+
+        const initialData = [
+  {
+    "azienda": "A. ANANIA MEDICAL&WELLNESS CENTER SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "AB-GLOBAL SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ABEAUTY SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ALCEA SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ANGOLO KAPPA",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "AOX ITALIA SRL",
+    "pad": "-",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ARROW 1 SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ARVAL SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ASSOCIAZIONE ITALIANA INFORMATORI COSMETICI QUALIFICATI - AIICQ",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "B&M SRL MARKETING NEL BENESSERE",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "BAKEL SPA",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "BEAUTYGE ITALY SPA",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "BEAUTYTIME INTERNATIONAL SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "BEIERSDORF SPA",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "BELLEZZA IN FARMACIA",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "BLUEBERRY SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "CARMA ITALIA SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "CERRI ITALIA SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "CLABIOTECH SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "CLINICALFARMA SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "COSMOFARMA",
+    "pad": "-",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "COSPAL ITALIA SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "DA GALENO OFFICINE COSMETICHE SRL",
+    "pad": "-",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "DERMEDIC",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "DILFAM SRL UNIPERSONALE",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "DORA BRUSCHI 1934 SRL SOCIETA’ BENEFIT",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "E.FA.S. SPA",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ESSENTIA SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ESTEE LAUDER SRL",
+    "pad": "-",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ESUNMED BIOTECHNOLOGY (SHENZHEN) CO. LTD.",
+    "pad": "-",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ETOOPHARMA SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "F.G. COSMETICS SRL SOCIETÀ BENEFIT",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FORMULARIUM SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "GIORGIO JANEKE SRL",
+    "pad": "-",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "GM INDUSTRIE ITALIANE SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "HEADMASTER INTERNATIONAL SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "IAMARES SRL SOCIETA&#039; BENEFIT",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "IAP PHARMA SLU",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "INDUSTRIAS BETER SA",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "IPPA SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ITALECO SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "KELISEMA SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "L&#039;ERBOLARIO SOCIETA BENEFIT S.R.L.",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "LA MAGA SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "LA SAPONARIA SRL SOCIETÀ BENEFIT",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "LABORATOIRES SVR ITALIA SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "LABORATORI EFFE SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "LABORATORI PAVAGLIONE SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "LAMUSELAB SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "LEMI GROUP",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "M&D PHARMACY SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MAMI SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MANTIS SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MARCHESINI GROUP",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MAST INDUSTRIA ITALIANA SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MAVALA ITALIA SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MEDICAL CONCEPT SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MESORGA SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MIIN COSMETICS SL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MINERVA RESEARCH LABS",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MITI SPA",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "OLFATTIVA SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ORGANICS PHARM",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "OYSTER COSMETICS SPA",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "PARURE SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "PASQUALI SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "PATYKA ITALIA SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "PURESKIN LAB SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "Q ITALY SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ROKLAR COSMETICS SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ROSSI ITALIA SRLS",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ROUGJ GROUP SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "S.C.M. SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SANICO SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SIFARMA SPA",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SKINBUSINESS SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "VITRY FRERES",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "I.N.C.A.P. SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SUNRISE SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "A.MENARINI DIAGNOSTICS SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ABACUS MEDICINE",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ACCURY SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ACFP SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ACUSTIKA BY MONTEFARMACO OTC SPA",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ALPINE FRANCE SAS",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ASSOCIAZIONE METROPOLITANA LILT DI BOLOGNA",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "AURIGANE SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "AUROBINDO PHARMA ITALIA SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "BAUSCH & LOMB IOM SPA",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "BEAUTY TOM SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "BIOMEDIKS LAB S L",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "BROAD ORIGIN INC.",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "BUZZ ITALIA",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "CALLEGARI SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "CALZIFICIO PINELLI SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "CE.M.O.N. SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "CURASEPT SPA",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "D.FENSTEC SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "DIFAR DISTRIBUZIONE SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "DR. HOP",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "EG SPA",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FA.BE.SA.CI. SOCIETA&#039; CONSORTILE A R.L. FARMACIE PER IL BENESSERE E LA SALUTE DEI CITTADIN",
+    "pad": "-",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FAGRON ITALIA SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FARMACARE SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FARMACIA TERNELLI SNC",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FARMALABOR SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FATER SPA",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FEDAIISF",
+    "pad": "-",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FEDERAZIONE NAZIONALE PARAFARMACIE ITALIANE APS",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FIDIA FARMACEUTICI SPA",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FLAEM NUOVA SPA",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FUTURPHARMA ASSOCIAZIONE FARMACISTI",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "GALENO SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "GARMED SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "GELATERIA INTERNATIONAL SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "GELDIS SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "GISA SRL",
+    "pad": "-",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "I.O.I. INDUSTRIE OTTICHE ITALIANE SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "JAGER & PARTNERS SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "KETHEMA FARMACEUTICI SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "LAZZANED GROUP SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "LEGE ARTIS MH, D.O.O.",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "LELOI AB",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MAURI MODA SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MEDEL INTERNATIONAL SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MEDIFARM SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MICROTRACE DIAGNOSTICI SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MINIAS GLOBE DIAGNOSTICS SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MOVIMENTO NAZIONALE LIBERI FARMACISTI",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "NAL VON MINDEN SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "NATRIX SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "NATURWAREN ITALIA SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "NEWPHARMA SHOP SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "NOVA BIOMEDICAL ITALIA SRL",
+    "pad": "-",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ONWOOD GREEN BEAUTY ACCESSORIES",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "P.B. PHARMA SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "PAVIA CONSULTING SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "PERLETTI",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "PHARMA LAB DI LAMEDICA VINCENZO",
+    "pad": "-",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "PHARMACHEM SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "PRIMA LAB SA",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "PROCTER & GAMBLE SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "PUBBLIEFFE SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "RECKITT BENCKISER HEALTHCARE (ITALIA) SPA",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ROCHE DIAGNOSTICS SPA",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ROSSMAX BY BILADI LTD.",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SALUTE AMICA S.C.A.R.L.",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SASSI EDITORE SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SESTRE SRLS",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "TILRAY MEDICAL ITALIA SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "TYKHE DOO",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "UNIMED SRL",
+    "pad": "-",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "URAGME SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "VODEN MEDICAL INSTRUMENTS SPA",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ZIPPO ITALIA SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ACQUA CERELIA - SORGENTI ITALIANE REGIONALI SPA",
+    "pad": "-",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ALTA NATURA - INALME SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "AQUAVIVA SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ARKOFARM SRL",
+    "pad": "-",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "BIOS LINE SPA",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "CHIRIOTTI EDITORE SRL",
+    "pad": "-",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "CONCESSIONARIA ITALIANA PUBBLICITA&#039; G&V SRL",
+    "pad": "-",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "DIETMED ITALIA SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "EDIZIONI RGR SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ERBAMEA SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "EUROSPITAL SPA",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FARMA FLORENCE SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FARMAFOOD SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FENICE CREMISI SRL",
+    "pad": "-",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "GIUBILEO BOTANICALS",
+    "pad": "-",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "HALEON ITALY SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "HEALTH AND HAPPINESS ITALY SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "HEALTION SRL SOCIETA&#039; BENEFIT (PROBIOS SRL)",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "IMO SPA",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "KASTOR PHARMA SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "L-NUTRA ITALIA SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "LA FABBRICA DELLA PASTA DI GRAGNANO SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "LA STREGA SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "LABORATORI BIOKYMA SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "LAERBIUM PHARMA SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "LUXURY LAB COSMETICS SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MARCHIO FARMACIA SPA",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MEDPRO NUTRACEUTICALS",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MIALICA SRLS",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MOLDES SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MOTTA SAS DI MOTTA CARMELA & C.",
+    "pad": "-",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "NAMED SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "NATURAL INGREDIENTS SOLUTION SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "NOVANATURA INTERNATIONAL SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "PHARMALIFE RESEARCH SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "RYVI PHARMA SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SIFAR ILACLARI TICARET VE SANAYI A.S. (SIFAR NUTRA)",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SOLGAR ITALIA MULTINUTRIENT SPA",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "STUDIO 3 FARMA SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SUITEFOOD SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "TECNOFOOD SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "U.G.A. NUTRACEUTICALS SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "VEGETAL-PROGRESS SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "VIS NATURAE SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "VITA AL TOP SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ZETA 92 SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ZUCCARI SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SOKE SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ASSOCIAZIONE SCIENTIFICA FARMACISTI ITALIANI",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "DUESSE MEDIA NETWORK SRL",
+    "pad": "-",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "EDRA EDIZIONI SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ENPAF - ENTE NAZIONALE DI PREVIDENZA E ASSISTENZA FARMACISTI",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FEDERAZIONE ORDINI FARMACISTI ITALIANI",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FEDERFARMA",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FONDAZIONE BANCO FARMACEUTICO ETS",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FONDAZIONE FRANCESCO CANNAVÒ",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "GIACOMO PISANO",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "HELYX SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "HOMNYA SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "INCASODI SNC",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MEDE SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SIFAP - SOCIETA&#039; ITALIANA FARMACISTI PREPARATORI",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "UCFI - UNIONE CATTOLICA FARMACISTI ITALIANI",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "UTIFAR - UNIONE TECNICA ITALIANA FARMACISTI",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "WE MAKE FUTURE",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "2GEM SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "2WIN SRL SOCIETÀ BENEFIT - ECOSHOPPER",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "A.S.S.O. FARM FARMACIE COMUNALI",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "AD ABITI DA LAVORO GROUP SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ADVANCED ELECTRONIC BIOSYSTEM SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "AIZOI SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ARCHILEGNO SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ASG SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ATAENA SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "AZ DESIGN SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "BANCA DEL FUCINO SPA",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "BECTON DICKINSON ROWA ITALY SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "BUSSETTI E MAZZA SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "BUTTERFLY LAB SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "CAEM-MAGRINI SPA",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "CALENDARIODELLASALUTE - UNISERVICES SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "CASHMATIC SPA",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "CEMAB SRL",
+    "pad": "26",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "CLOU | PROGETTA | ARREDA | COMUNICA",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "COSTA SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "CSF SISTEMI SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "DAY1 SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "DOCTORAPP SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "EDOCITALIA SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "EKOFARMA SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "EVEREX SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FARMA-TRADE SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FARMADATI ITALIA SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FARMAECOLOGIA SRL SB",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FARMANIA.IT SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FARMEDICO SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FIOCCHETTI SCIENTIFIC SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FRI.MED. SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FTNET SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "FULCRI SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "GALILEOPRO SPA",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "GAMMA PHARMACY EQUIPMENT",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "GARMIN ITALIA SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "GLOBAL FACTORIES B.V.",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "GOLLMANN ITALIA",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "GOVISIT SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "GPI SPA",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "HEALTH TELEMATIC NETWORK SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "HO.BAG CORPORATE SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "HYPHEN-GROUP SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "IGB SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "IL SOLE 24 ORE SPA",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "INNOVA 365 SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ITAB FARMACIE",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ITALIAN STYLE COMPANY SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ITECO SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "KELEMATA SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "KITABII S.R.L.",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "LA TECNOMEDICA SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "LABEL AUTOMATION",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "LEDPIU&#039; SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "LIEBHERR DISTRIBUZIONE ITALIA SPA",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MAREFARM SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MASTER IN PREPARAZIONI GALENICHE - UNIVERSITA&#039; DI CAMERINO",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MAXMEDICAL SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MEDEA TELEMEDICINA",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MEDICAL LOCA SERVICES (E-SANTE&#039; ROBOTIK)",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MEDIN SISTEMI SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MEKASAFE SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MONDO GRAFICO SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "MULTIGEL SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "NEULAB SRLS",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "NEW LINE DIGITAL SIGNAGE SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ORIENTA HEALTHCARE",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "PHARMAGEST ITALIA SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "PHARMASERVICE SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "PHARMASHOP24 SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "PHARMATHEK SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "PIARDI TECNOLOGIE DEL FREDDO SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "PM FARMA SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "PROMELIT COMMUNICATION SYSTEMS SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "PROXIMA SPA SOCIETA&#039; BENEFIT",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "QS POS SRL - PANACEA GESTIONALE FARMACIE",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SAVIPACK SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SCATOLIFICIO MEDICINESE SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SENFINA LABS S.R.O.",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SID PARMA SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SIMON KUCHER & PARTNERS ITALIA SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SITEAM SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SMART MOB SRLS",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SOKETO SRL",
+    "pad": "25",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "STRIPFOIL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "STUDIOFARMA SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "SUNNEXT SRL",
+    "pad": "29",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "TELEMEDICO SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "TH.KOHL SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "U.SPOT ADVERTISING SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ULIXE ITALY SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "UNIFRIGOR SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "VENDIX SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "WINSPOT SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "YEB! SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  },
+  {
+    "azienda": "ZANCHETTIN SRL",
+    "pad": "30",
+    "omaggio": "-",
+    "contatto": "-",
+    "stato": "IN ATTESA",
+    "history": []
+  }
+];
+
+        let added = 0;
         for (const item of initialData) {
             const newDocRef = doc(collection(db, "companies"));
             await setDoc(newDocRef, item);
+            added++;
+            if (added % 50 === 0) console.log(`Aggiunte ${added} aziende...`);
         }
         console.log("Migrazione completata!");
+        alert("Sincronizzazione completata! Ricarica la pagina.");
+        location.reload();
     }
     async function login() {
         const { auth, provider, signInWithPopup } = window.firebaseApp;
@@ -454,8 +3046,9 @@
 
     async function saveInteraction() {
         if (currentSelection.index !== null) {
-            const { db, doc, updateDoc } = window.firebaseApp;
+            const { db, doc, updateDoc, arrayUnion, auth } = window.firebaseApp;
             const item = database[currentSelection.index];
+            const user = auth.currentUser;
 
             const updatedData = {
                 omaggio: currentSelection.omaggio,
@@ -463,17 +3056,19 @@
                 stato: currentSelection.stato
             };
 
+            const logEntry = {
+                user: user ? user.email : "Anonimo",
+                details: `Modifica: Omaggio ${updatedData.omaggio}, Contatto ${updatedData.contatto}, Stato ${updatedData.stato}`,
+                timestamp: new Date().toISOString()
+            };
+
             try {
                 // Aggiorna su Firestore
                 const companyRef = doc(db, "companies", item.id);
-                await updateDoc(companyRef, updatedData);
-
-                // Aggiorna localmente
-                item.omaggio = updatedData.omaggio;
-                item.contatto = updatedData.contatto;
-                item.stato = updatedData.stato;
-
-                renderTable(item.azienda);
+                await updateDoc(companyRef, {
+                    ...updatedData,
+                    history: arrayUnion(logEntry)
+                });
 
                 // Reset form
                 document.getElementById('interactionForm').classList.add('hidden');
@@ -492,23 +3087,146 @@
         }
     }
 
+    function protectedMigration() {
+        const password = prompt("Inserisci la password di sicurezza per il RESET totale:");
+        if (password === "reset") {
+            runInitialMigration(window.firebaseApp.db, window.firebaseApp.collection, window.firebaseApp.doc, window.firebaseApp.setDoc, true);
+        } else if (password !== null) {
+            alert("Password errata.");
+        }
+    }
+
     function renderTable(highlightName = null) {
         const tbody = document.getElementById('tableBody');
-        tbody.innerHTML = database.map(item => `
-                <tr class="${item.azienda === highlightName ? 'highlight-row' : ''}">
-                    <td class="px-6 py-4 font-medium text-slate-900">${item.azienda}</td>
-                    <td class="px-6 py-4 text-center text-slate-500">${item.pad}</td>
-                    <td class="px-6 py-4 text-center">
-                        <span class="text-xs ${item.omaggio === 'Sì' ? 'text-green-600 font-bold' : 'text-slate-400'}">${item.omaggio}</span>
+        const padFilter = document.getElementById('padFilter').value;
+        
+        let filteredData = database;
+        if (padFilter !== 'ALL') {
+            filteredData = database.filter(item => item.pad === padFilter);
+        }
+
+        tbody.innerHTML = filteredData.map(item => {
+            const hasHistory = item.history && item.history.length > 0;
+            const lastLog = hasHistory ? item.history[item.history.length - 1] : null;
+            const lastUser = lastLog ? lastLog.user : 'None';
+            
+            return `
+                <tr class="${item.azienda === highlightName ? 'highlight-row' : ''} ${hasHistory ? 'bg-blue-50/50' : ''} hover:bg-slate-50 transition-colors">
+                    <td class="px-4 py-3">
+                        <div class="text-sm font-bold text-slate-800 break-words leading-tight cursor-pointer" onclick="selectCompany('${item.azienda.replace(/'/g, "\\'")}')">${item.azienda}</div>
                     </td>
-                    <td class="px-6 py-4 text-center">
-                        <span class="text-xs ${item.contatto === 'Sì' ? 'text-blue-600 font-bold' : 'text-slate-400'}">${item.contatto}</span>
+                    <td class="px-2 py-3 text-center text-[10px] text-slate-500 font-medium">${item.pad}</td>
+                    
+                    <!-- Inline Omaggio -->
+                    <td class="px-2 py-3 text-center">
+                        <button onclick="toggleFieldInline('${item.id}', 'omaggio', '${item.omaggio}')" 
+                                class="w-8 h-8 rounded-full text-[10px] font-black transition-all ${item.omaggio === 'Sì' ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-400'}">
+                            ${item.omaggio === 'Sì' ? 'SI' : 'NO'}
+                        </button>
                     </td>
-                    <td class="px-6 py-4 text-center">
-                        <span class="status-pill ${getStatusClass(item.stato)}">${item.stato}</span>
+
+                    <!-- Inline Contatto -->
+                    <td class="px-2 py-3 text-center">
+                        <button onclick="toggleFieldInline('${item.id}', 'contatto', '${item.contatto}')" 
+                                class="w-8 h-8 rounded-full text-[10px] font-black transition-all ${item.contatto === 'Sì' ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-400'}">
+                            ${item.contatto === 'Sì' ? 'SI' : 'NO'}
+                        </button>
+                    </td>
+
+                    <!-- Inline Stato -->
+                    <td class="px-2 py-3 text-center">
+                        <select onchange="updateStatoInline('${item.id}', this.value)" 
+                                class="text-[9px] font-bold p-1 rounded-lg border-none ${getStatusClass(item.stato)} focus:ring-0 cursor-pointer appearance-none text-center min-w-[80px]">
+                            <option value="IN ATTESA" ${item.stato === 'IN ATTESA' ? 'selected' : ''}>ATTESA</option>
+                            <option value="DA CONTATTARE" ${item.stato === 'DA CONTATTARE' ? 'selected' : ''}>CONTATTARE</option>
+                            <option value="NO SECCO" ${item.stato === 'NO SECCO' ? 'selected' : ''}>NO SECCO</option>
+                        </select>
+                    </td>
+
+                    <!-- Clickable Log -->
+                    <td class="px-4 py-3 text-center">
+                        <div class="cursor-pointer active:scale-95 transition-transform flex flex-col items-center justify-center gap-1" onclick="showFullHistory('${item.id}')">
+                            <div class="text-[10px] font-bold ${hasHistory ? 'text-blue-700' : 'text-slate-400'} whitespace-nowrap leading-tight">
+                                ${lastUser !== 'None' ? lastUser : '<span class="font-normal italic">Nessuna</span>'}
+                            </div>
+                            ${lastLog ? `<div class="text-[8px] text-slate-400">${new Date(lastLog.timestamp).toLocaleTimeString('it-IT', {hour:'2-digit', minute:'2-digit'})}</div>` : ''}
+                        </div>
                     </td>
                 </tr>
+            `;
+        }).join('');
+    }
+
+    async function toggleFieldInline(id, field, currentValue) {
+        const newValue = (currentValue === 'Sì' || currentValue === 'SI') ? 'No' : 'Sì';
+        const { db, doc, updateDoc, arrayUnion, auth } = window.firebaseApp;
+        const user = auth.currentUser;
+        
+        const logEntry = {
+            user: user ? user.email : "Anonimo",
+            details: `Cambio rapido ${field}: ${newValue}`,
+            timestamp: new Date().toISOString()
+        };
+
+        try {
+            const companyRef = doc(db, "companies", id);
+            await updateDoc(companyRef, {
+                [field]: newValue,
+                history: arrayUnion(logEntry)
+            });
+        } catch (error) {
+            console.error("Errore update rapido:", error);
+        }
+    }
+
+    async function updateStatoInline(id, newValue) {
+        const { db, doc, updateDoc, arrayUnion, auth } = window.firebaseApp;
+        const user = auth.currentUser;
+        
+        const logEntry = {
+            user: user ? user.email : "Anonimo",
+            details: `Cambio rapido stato: ${newValue}`,
+            timestamp: new Date().toISOString()
+        };
+
+        try {
+            const companyRef = doc(db, "companies", id);
+            await updateDoc(companyRef, {
+                stato: newValue,
+                history: arrayUnion(logEntry)
+            });
+        } catch (error) {
+            console.error("Errore update stato:", error);
+        }
+    }
+
+    function showFullHistory(id) {
+        const item = database.find(i => i.id === id);
+        if (!item) return;
+
+        const modal = document.getElementById('historyModal');
+        const content = document.getElementById('modalContent');
+        document.getElementById('modalTitle').innerText = `Storico: ${item.azienda}`;
+
+        if (!item.history || item.history.length === 0) {
+            content.innerHTML = '<p class="text-slate-400 text-center">Nessuna attività registrata.</p>';
+        } else {
+            content.innerHTML = item.history.slice().reverse().map(log => `
+                <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="font-bold text-blue-700 text-sm">${log.user}</span>
+                        <span class="text-[10px] text-slate-400 bg-white px-2 py-1 rounded-full shadow-sm">${new Date(log.timestamp).toLocaleString('it-IT')}</span>
+                    </div>
+                    <p class="text-slate-700 text-sm">${log.details}</p>
+                </div>
             `).join('');
+        }
+
+        modal.classList.remove('hidden');
+    }
+
+    function closeHistoryModal() {
+        document.getElementById('historyModal').classList.add('hidden');
     }
 
     function getStatusClass(stato) {
